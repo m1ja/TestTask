@@ -26,6 +26,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @version     2.1.0
  * @package     WooCommerce\Abstracts
  */
+require_once( ABSPATH . 'wp-content\plugins\woocommerce\includes\abstracts\abstract-wc-settings-api.php');
 abstract class WC_Payment_Gateway extends WC_Settings_API {
 
 	/**

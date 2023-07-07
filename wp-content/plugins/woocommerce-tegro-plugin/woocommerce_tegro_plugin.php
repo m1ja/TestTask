@@ -1,79 +1,83 @@
 <?php
 /**
- * Plugin Name: Tegro Payment Plugin
+ * Plugin Name: WooCommerce Tegro Plugin
  * Description: Плагин для интеграции Tegro с WooCommerce.
  * Version: 1.0
  * Author: Ваше имя
  * Author URI: https://example.com/
  */
 
-// Подключаем функцию обработки платежа
-add_action( 'woocommerce_api_payment', 'tegro_process_payment' );
-function tegro_process_payment() {
-    // Получаем данные платежа из запроса
-    $order_id = $_POST['order_id'];
-    $amount = $_POST['amount'];
+// Регистрация метода оплаты в WooCommerce
+add_filter('woocommerce_payment_gateways', 'add_tegro_payment_gateway');
+function add_tegro_payment_gateway($gateways)
+{
+    $gateways[] = 'WC_Tegro_Payment_Gateway';
+    return $gateways;
+}
 
-    // Формируем данные для отправки в Tegro API
-    $tegro_data = array(
-        'order_id' => $order_id,
-        'amount' => $amount,
-        // Добавьте другие необходимые данные для Tegro API
-    );
+// Класс для обработки оплаты через Tegro
+require_once( ABSPATH . 'wp-content/plugins/woocommerce/includes/abstracts/abstract-wc-payment-gateway.php' );
+require_once( ABSPATH . 'wp-content\plugins\woocommerce\includes\abstracts\abstract-wc-settings-api.php');
 
-    // Выполняем запрос к Tegro API
-    $tegro_api_url = 'https://tegro.money/api/endpoint';
-    $tegro_token = 'your_tegro_token'; // Замените на ваш реальный токен авторизации
-    $tegro_headers = array(
-        'Content-Type' => 'application/json',
-        'Authorization' => 'Bearer ' . $tegro_token,
-    );
+class WC_Tegro_Payment_Gateway extends WC_Payment_Gateway
+{
+    public function __construct()
+    {
+        $this->id = 'tegro_payment_gateway';
+        $this->method_title = 'Tegro Payment Gateway'; // Название метода оплаты, которое будет отображаться в настройках
+        $this->method_description = 'Оплата через Tegro API'; // Описание метода оплаты
+        $this->has_fields = false;
 
-    $tegro_response = wp_remote_post( $tegro_api_url, array(
-        'headers' => $tegro_headers,
-        'body' => json_encode( $tegro_data ),
-    ) );
+        // Добавьте здесь дополнительные настройки для вашего метода оплаты (например, настройки API и другие)
 
-    if ( ! is_wp_error( $tegro_response ) ) {
-        $tegro_body = json_decode( wp_remote_retrieve_body( $tegro_response ), true );
+        $this->init_form_fields();
+        $this->init_settings();
 
-        // Проверяем статус ответа от Tegro API
-        if ( $tegro_response['response']['code'] === 200 && $tegro_body['success'] ) {
-            // Платеж успешно обработан
+        $this->title = $this->get_option('title'); // Название метода оплаты, которое будет отображаться для покупателя
+        $this->description = $this->get_option('description'); // Описание метода оплаты, которое будет отображаться для покупателя
 
-            // Получаем объект заказа
-            $order = wc_get_order( $order_id );
+        add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
+    }
 
-            // Помечаем заказ как оплаченный
-            $order->payment_complete();
+    public function init_form_fields()
+    {
+        $this->form_fields = array(
+            'enabled' => array(
+                'title' => 'Включить/Выключить',
+                'type' => 'checkbox',
+                'label' => 'Включить оплату через Tegro',
+                'default' => 'yes'
+            ),
+            'title' => array(
+                'title' => 'Название',
+                'type' => 'text',
+                'description' => 'Название метода оплаты, отображаемое для покупателя',
+                'default' => 'Tegro Payment',
+                'desc_tip' => true
+            ),
+            'description' => array(
+                'title' => 'Описание',
+                'type' => 'textarea',
+                'description' => 'Описание метода оплаты, отображаемое для покупателя',
+                'default' => 'Оплата через Tegro API'
+            )
+        );
+    }
 
-            // Добавляем заметку к заказу
-            $order->add_order_note( 'Заказ успешно оплачен через Tegro.' );
+    public function process_payment($order_id)
+    {
+        // Обработка оплаты через Tegro API
+        // Здесь вы можете добавить код для обработки платежа через Tegro
 
-            // Очищаем корзину
-            WC()->cart->empty_cart();
+        // Вызываем функцию обработки платежей из файла Python
+        exec('C:\xampp\htdocs\TestTask\wp-content\plugins\woocommerce-tegro-plugin\woocommerce_tegro_plugin.py' . $order_id);
 
-            // Возвращаем успешный ответ
-            wp_send_json_success( array(
-                'message' => 'Оплата успешно выполнена.',
-            ) );
-        } else {
-            // Ошибка при обработке платежа
+        $order = wc_get_order($order_id);
+        $order->update_status('on-hold', 'Ожидание оплаты'); // Установка статуса заказа
 
-            // Получаем текст ошибки из ответа Tegro API
-            $error_message = isset( $tegro_body['error'] ) ? $tegro_body['error'] : 'Произошла ошибка при обработке платежа.';
-
-            // Возвращаем ошибку
-            wp_send_json_error( array(
-                'message' => $error_message,
-            ) );
-        }
-    } else {
-        // Ошибка при выполнении запроса к Tegro API
-
-        // Возвращаем ошибку
-        wp_send_json_error( array(
-            'message' => 'Произошла ошибка при выполнении запроса к Tegro API.',
-        ) );
+        return array(
+            'result' => 'success',
+            'redirect' => $this->get_return_url($order)
+        );
     }
 }
